@@ -1,62 +1,172 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { PlusCircle, RotateCcw, Activity } from 'lucide-react';
-import { Participant, Expense } from './types';
+import { PlusCircle, RotateCcw, Activity, ArrowLeft, Trash2, Archive, Home, Users } from 'lucide-react';
+import { Participant, Expense, Session } from './types';
 import { calculateBalances, calculateSettlements, formatCurrency } from './services/finance';
 import { Button } from './components/Button';
 import { ParticipantManager } from './components/ParticipantManager';
 import { Modal } from './components/Modal';
 import { ExpenseList } from './components/ExpenseList';
 import { SettlementPlan } from './components/SettlementPlan';
+import { TripHistory } from './components/TripHistory';
+import { TripVisualization } from './components/TripVisualization';
+import { FriendsProfile } from './components/FriendsProfile';
+
+// Helper for safe UUID generation in all environments
+const generateUUID = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    try {
+      return crypto.randomUUID();
+    } catch (e) {
+      // Fallback if randomUUID fails
+    }
+  }
+  return Date.now().toString(36) + Math.random().toString(36).substring(2);
+};
 
 export default function App() {
-  // State
-  const [participants, setParticipants] = useState<Participant[]>(() => {
-    const saved = localStorage.getItem('fs_participants');
-    return saved ? JSON.parse(saved) : [];
-  });
-  
-  const [expenses, setExpenses] = useState<Expense[]>(() => {
-    const saved = localStorage.getItem('fs_expenses');
-    return saved ? JSON.parse(saved) : [];
+  // --- Global State: Sessions ---
+  const [sessions, setSessions] = useState<Session[]>(() => {
+    const savedSessions = localStorage.getItem('fs_sessions');
+    if (savedSessions) return JSON.parse(savedSessions);
+
+    // MIGRATION: Check for old single-session data
+    const oldParticipants = localStorage.getItem('fs_participants');
+    const oldExpenses = localStorage.getItem('fs_expenses');
+    
+    if (oldParticipants || oldExpenses) {
+      const migratedSession: Session = {
+        id: generateUUID(),
+        name: 'Mi Primer Viaje (Recuperado)',
+        dateCreated: Date.now(),
+        status: 'active',
+        participants: oldParticipants ? JSON.parse(oldParticipants) : [],
+        expenses: oldExpenses ? JSON.parse(oldExpenses) : []
+      };
+      return [migratedSession];
+    }
+    return [];
   });
 
-  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   
-  // Expense Form State (Local to App to keep simple or could be extracted)
+  // State for legacy trip type selection
+  const [showTypeSelectionModal, setShowTypeSelectionModal] = useState(false);
+
+  // Persistence for Sessions
+  useEffect(() => {
+    localStorage.setItem('fs_sessions', JSON.stringify(sessions));
+  }, [sessions]);
+
+  // Derived State: Current Active Session Data
+  const currentSession = useMemo(() => 
+    sessions.find(s => s.id === currentSessionId), 
+    [sessions, currentSessionId]
+  );
+
+  // Check if current session needs type assignment (Legacy support)
+  useEffect(() => {
+    if (currentSessionId && currentSession && !currentSession.type) {
+      setShowTypeSelectionModal(true);
+    } else {
+      setShowTypeSelectionModal(false);
+    }
+  }, [currentSessionId, currentSession]);
+
+  const participants = currentSession?.participants || [];
+  const expenses = currentSession?.expenses || [];
+
+  const balances = useMemo(() => calculateBalances(participants, expenses), [participants, expenses]);
+  const settlements = useMemo(() => calculateSettlements(balances), [balances]);
+  const totalSpent = useMemo(() => expenses.reduce((sum, e) => sum + e.amount, 0), [expenses]);
+
+  // --- UI State ---
+  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
   const [desc, setDesc] = useState('');
   const [amount, setAmount] = useState('');
   const [payer, setPayer] = useState('');
   const [involved, setInvolved] = useState<string[]>([]);
 
-  // Persistence
-  useEffect(() => {
-    localStorage.setItem('fs_participants', JSON.stringify(participants));
-  }, [participants]);
+  // --- Session Management Handlers ---
 
-  useEffect(() => {
-    localStorage.setItem('fs_expenses', JSON.stringify(expenses));
-  }, [expenses]);
+  const handleCreateSession = (name: string, type: 'family' | 'friends') => {
+    const newSession: Session = {
+      id: generateUUID(),
+      name,
+      dateCreated: Date.now(),
+      status: 'active',
+      type: type,
+      participants: [],
+      expenses: []
+    };
+    setSessions(prev => [newSession, ...prev]);
+    setCurrentSessionId(newSession.id);
+  };
 
-  // Derived State
-  const balances = useMemo(() => calculateBalances(participants, expenses), [participants, expenses]);
-  const settlements = useMemo(() => calculateSettlements(balances), [balances]);
-  const totalSpent = useMemo(() => expenses.reduce((sum, e) => sum + e.amount, 0), [expenses]);
+  const handleDuplicateSession = (id: string) => {
+    const sessionToCopy = sessions.find(s => s.id === id);
+    if (!sessionToCopy) return;
 
-  // Handlers
+    const newSession: Session = {
+      ...sessionToCopy,
+      id: generateUUID(),
+      name: `${sessionToCopy.name} (copia)`,
+      dateCreated: Date.now(),
+      status: 'active' // Always activate copy
+    };
+    setSessions(prev => [newSession, ...prev]);
+  };
+
+  const handleArchiveSession = (id: string) => {
+    setSessions(prev => prev.map(s => 
+      s.id === id ? { ...s, status: 'archived' } : s
+    ));
+    if (currentSessionId === id) setCurrentSessionId(null);
+  };
+
+  const handleRestoreSession = (id: string) => {
+    setSessions(prev => prev.map(s => 
+      s.id === id ? { ...s, status: 'active' } : s
+    ));
+  };
+
+  const handleDeleteSession = (id: string) => {
+    if (window.confirm('¿Estás seguro de eliminar este viaje y todos sus datos permanentemente?')) {
+      setSessions(prev => prev.filter(s => s.id !== id));
+      if (currentSessionId === id) setCurrentSessionId(null);
+    }
+  };
+
+  const updateCurrentSession = (updatedFields: Partial<Session>) => {
+    if (!currentSessionId) return;
+    setSessions(prev => prev.map(s => 
+      s.id === currentSessionId ? { ...s, ...updatedFields } : s
+    ));
+  };
+
+  const assignTypeToCurrentSession = (type: 'family' | 'friends') => {
+    updateCurrentSession({ type });
+    setShowTypeSelectionModal(false);
+  };
+
+  // --- Inner App Handlers (operate on currentSession) ---
+
   const addParticipant = (name: string) => {
-    const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString() + Math.random().toString().slice(2);
+    const newId = generateUUID();
     const newParticipant = { id: newId, name };
-    setParticipants([...participants, newParticipant]);
+    updateCurrentSession({ 
+      participants: [...participants, newParticipant] 
+    });
   };
 
   const removeParticipant = (id: string) => {
-    // Check if involved in expenses
     const hasExpenses = expenses.some(e => e.payerId === id || e.involvedIds.includes(id));
     if (hasExpenses) {
-      alert("No puedes eliminar a esta persona porque es parte de gastos existentes. Por favor elimina sus gastos primero.");
+      alert("No puedes eliminar a esta persona porque es parte de gastos existentes.");
       return;
     }
-    setParticipants(participants.filter(p => p.id !== id));
+    updateCurrentSession({ 
+      participants: participants.filter(p => p.id !== id) 
+    });
   };
 
   const openExpenseModal = () => {
@@ -67,7 +177,7 @@ export default function App() {
     setDesc('');
     setAmount('');
     setPayer(participants[0]?.id || '');
-    setInvolved(participants.map(p => p.id)); // Default to everyone
+    setInvolved(participants.map(p => p.id));
     setIsExpenseModalOpen(true);
   };
 
@@ -75,11 +185,8 @@ export default function App() {
     e.preventDefault();
     if (!desc || !amount || !payer || involved.length === 0) return;
 
-    // Robust ID generation
-    const newId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString() + Math.random().toString().slice(2);
-
     const newExpense: Expense = {
-      id: newId,
+      id: generateUUID(),
       description: desc,
       amount: parseFloat(amount),
       payerId: payer,
@@ -87,20 +194,17 @@ export default function App() {
       date: Date.now()
     };
 
-    setExpenses([...expenses, newExpense]);
+    updateCurrentSession({
+      expenses: [...expenses, newExpense]
+    });
     setIsExpenseModalOpen(false);
   };
 
   const deleteExpense = (id: string) => {
     if (window.confirm('¿Estás seguro de que deseas eliminar este gasto?')) {
-      setExpenses(currentExpenses => currentExpenses.filter(e => e.id !== id));
-    }
-  };
-
-  const resetAll = () => {
-    if (confirm('Esto eliminará TODOS los datos (participantes y gastos). ¿Estás seguro?')) {
-      setParticipants([]);
-      setExpenses([]);
+      updateCurrentSession({
+        expenses: expenses.filter(e => e.id !== id)
+      });
     }
   };
 
@@ -112,29 +216,88 @@ export default function App() {
     }
   };
 
-  return (
-    <div className="min-h-screen bg-gray-50 pb-20">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-3xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+  // --- Render ---
+
+  // View: Trip History (If no session selected)
+  if (!currentSessionId || !currentSession) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
+          <div className="max-w-4xl mx-auto px-4 h-16 flex items-center gap-2">
             <div className="bg-indigo-600 p-1.5 rounded-lg text-white">
               <Activity size={20} />
             </div>
             <h1 className="text-xl font-bold text-gray-900 tracking-tight">PagaPues</h1>
           </div>
-          <Button variant="ghost" size="sm" onClick={resetAll} title="Reiniciar App">
-            <RotateCcw size={18} />
-          </Button>
+        </header>
+        <TripHistory 
+          sessions={sessions}
+          onSelect={setCurrentSessionId}
+          onCreate={handleCreateSession}
+          onDuplicate={handleDuplicateSession}
+          onArchive={handleArchiveSession}
+          onRestore={handleRestoreSession}
+          onDelete={handleDeleteSession}
+        />
+      </div>
+    );
+  }
+
+  // View: Active Session (Calculator)
+  return (
+    <div className="min-h-screen bg-gray-50 pb-20">
+      {/* Header */}
+      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
+        <div className="max-w-3xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setCurrentSessionId(null)}
+              className="text-gray-500 hover:text-indigo-600 transition-colors p-1"
+              title="Volver a mis viajes"
+            >
+              <ArrowLeft size={24} />
+            </button>
+            <div>
+              <div className="flex items-center gap-2">
+                <h1 className="text-lg font-bold text-gray-900 leading-tight">{currentSession.name}</h1>
+                {currentSession.type === 'friends' && (
+                  <span className="bg-purple-100 text-purple-700 text-[10px] px-1.5 py-0.5 rounded border border-purple-200 uppercase font-bold tracking-wide">Amigos</span>
+                )}
+              </div>
+              <p className="text-xs text-gray-500">PagaPues</p>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-1">
+            <button 
+              onClick={() => handleArchiveSession(currentSession.id)}
+              className="text-gray-400 hover:text-amber-600 p-2 rounded-full hover:bg-amber-50 transition-colors"
+              title="Archivar / Finalizar Viaje"
+            >
+              <Archive size={20} />
+            </button>
+            <button 
+              onClick={() => handleDeleteSession(currentSession.id)}
+              className="text-gray-400 hover:text-red-600 p-2 rounded-full hover:bg-red-50 transition-colors"
+              title="Eliminar Viaje Permanentemente"
+            >
+              <Trash2 size={20} />
+            </button>
+          </div>
         </div>
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-8 space-y-8">
         
+        {/* Friends Mode Profile Section */}
+        {currentSession.type === 'friends' && (
+          <FriendsProfile participants={participants} expenses={expenses} balances={balances} />
+        )}
+
         {/* Stats Card */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div className="bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-2xl p-6 text-white shadow-lg">
-             <span className="text-indigo-100 text-sm font-medium">Gasto Total del Grupo</span>
+          <div className={`rounded-2xl p-6 text-white shadow-lg ${currentSession.type === 'friends' ? 'bg-gradient-to-br from-purple-600 to-indigo-600' : 'bg-gradient-to-br from-indigo-500 to-indigo-700'}`}>
+             <span className="text-indigo-100 text-sm font-medium">Gasto Total del Evento</span>
              <div className="text-4xl font-bold mt-1">{formatCurrency(totalSpent)}</div>
              <div className="mt-4 text-xs bg-white/20 inline-block px-2 py-1 rounded">
                 {expenses.length} transacción{expenses.length !== 1 && 'es'}
@@ -150,6 +313,15 @@ export default function App() {
              </Button>
           </div>
         </div>
+
+        {/* Charts Visualization Section */}
+        {participants.length > 0 && (
+          <TripVisualization 
+            participants={participants} 
+            expenses={expenses} 
+            balances={balances} 
+          />
+        )}
 
         {/* Main Content Area */}
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
@@ -183,6 +355,42 @@ export default function App() {
         </div>
       </main>
 
+      {/* Modal for Legacy Trips: Assign Type */}
+      <Modal
+        isOpen={showTypeSelectionModal}
+        onClose={() => {}} // Can't close without selecting
+        title="¿Qué tipo de viaje es este?"
+      >
+        <div className="text-center space-y-4">
+          <p className="text-gray-600">
+            Estamos mejorando PagaPues. Para continuar con <strong>{currentSession.name}</strong>, selecciona el estilo del viaje:
+          </p>
+          <div className="grid grid-cols-2 gap-3 mt-4">
+            <button
+              onClick={() => assignTypeToCurrentSession('family')}
+              className="flex flex-col items-center justify-center p-4 border rounded-xl hover:bg-gray-50 hover:border-indigo-300 transition-all group"
+            >
+              <div className="bg-indigo-100 p-3 rounded-full mb-2 group-hover:scale-110 transition-transform">
+                <Home size={24} className="text-indigo-600" />
+              </div>
+              <span className="font-bold text-gray-800">Familiar</span>
+              <span className="text-xs text-gray-500 mt-1">Limpio y serio</span>
+            </button>
+
+            <button
+              onClick={() => assignTypeToCurrentSession('friends')}
+              className="flex flex-col items-center justify-center p-4 border rounded-xl hover:bg-purple-50 hover:border-purple-300 transition-all group"
+            >
+              <div className="bg-purple-100 p-3 rounded-full mb-2 group-hover:scale-110 transition-transform">
+                <Users size={24} className="text-purple-600" />
+              </div>
+              <span className="font-bold text-gray-800">Amigos</span>
+              <span className="text-xs text-gray-500 mt-1">Con badges y stats</span>
+            </button>
+          </div>
+        </div>
+      </Modal>
+
       {/* Add Expense Modal */}
       <Modal 
         isOpen={isExpenseModalOpen} 
@@ -194,6 +402,7 @@ export default function App() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Descripción</label>
             <input 
               required
+              autoFocus
               type="text" 
               placeholder="ej. Cena en Andrés D.C."
               value={desc}
@@ -220,16 +429,23 @@ export default function App() {
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Pagado Por</label>
-            <select 
-              value={payer} 
-              onChange={e => setPayer(e.target.value)}
-              className="w-full rounded-lg border-gray-300 border px-3 py-2 focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
-            >
+            <label className="block text-sm font-medium text-gray-700 mb-2">Pagado Por</label>
+            <div className="flex flex-wrap gap-2">
               {participants.map(p => (
-                <option key={p.id} value={p.id}>{p.name}</option>
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => setPayer(p.id)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    payer === p.id 
+                      ? 'bg-indigo-600 text-white shadow-md transform scale-105' 
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  }`}
+                >
+                  {p.name}
+                </button>
               ))}
-            </select>
+            </div>
           </div>
 
           <div>

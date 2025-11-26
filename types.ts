@@ -22,3 +22,13 @@ export interface Settlement {
   toId: string;
   amount: number;
 }
+
+export interface Session {
+  id: string;
+  name: string;
+  dateCreated: number;
+  status: 'active' | 'archived';
+  type?: 'family' | 'friends'; // New property for trip context
+  participants: Participant[];
+  expenses: Expense[];
+}
