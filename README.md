@@ -1,20 +1,45 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# PagaPues · División de gastos compartidos
 
-# Run and deploy your AI Studio app
+**Aplicación web para repartir gastos de un viaje o una salida en grupo y saldar las deudas con el menor número de pagos.**
 
-This contains everything you need to run your app locally.
+![React](https://img.shields.io/badge/React-TypeScript-3178C6?logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-build-646CFF?logo=vite&logoColor=white)
 
-View your app in AI Studio: https://ai.studio/apps/drive/1nsBcPztsjZTR9a-rK_AVe17PyHUXinR1
+---
 
-## Run Locally
+## Qué resuelve
 
-**Prerequisites:**  Node.js
+Cuando varias personas pagan distintos gastos durante un viaje, saber «quién le debe a quién» se vuelve confuso. PagaPues calcula el saldo de cada participante y propone un plan de pagos que salda todas las cuentas con pocas transferencias.
 
+## Cómo funciona
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+1. Se registran los participantes.
+2. Se registra cada gasto: quién pagó, cuánto y entre quiénes se reparte.
+3. La aplicación calcula el **saldo neto** de cada persona (lo que pagó menos lo que le corresponde).
+4. Un algoritmo **voraz** empareja a quienes más deben con quienes más deben recibir y genera el **plan de pagos**.
+
+## Estructura del proyecto
+
+```
+App.tsx
+components/
+  ParticipantManager.tsx   participantes
+  ExpenseList.tsx          gastos registrados
+  SettlementPlan.tsx       plan de pagos sugerido
+  FriendsProfile.tsx, Modal.tsx, Button.tsx
+services/finance.ts        cálculo de saldos y del plan de pagos
+types.ts                   modelo de datos
+```
+
+## Ejecución local
+
+Requisitos: Node.js 18 o superior.
+
+```bash
+npm install
+npm run dev
+```
+
+## Autoría
+
+**Camilo Andrés Henríquez Noguera**, estudiante de Ingeniería Industrial de la Universidad del Magdalena. Aplicación creada con apoyo de Google AI Studio.
